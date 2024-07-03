@@ -77,7 +77,7 @@ export abstract class UmbDetailRepositoryBase<
 	 * @return {*}
 	 * @memberof UmbDetailRepositoryBase
 	 */
-	async create(model: DetailModelType, parentUnique: string | null) {
+	async create(model: DetailModelType, parentUnique: string | null, notificationFragmentCategory?: string) {
 		if (!model) throw new Error('Data is missing');
 		await this.#init;
 
@@ -88,7 +88,11 @@ export abstract class UmbDetailRepositoryBase<
 
 			// TODO: how do we handle generic notifications? Is this the correct place to do it?
 			const notification = { data: { message: `Created` } };
-			this.#notificationContext!.peek('positive', notification);
+			if (notificationFragmentCategory) {
+				this.#notificationContext!.append('positive', notification, notificationFragmentCategory);
+			} else {
+				this.#notificationContext!.peek('positive', notification);
+			}
 		}
 
 		return { data: createdData, error };
@@ -100,7 +104,7 @@ export abstract class UmbDetailRepositoryBase<
 	 * @return {*}
 	 * @memberof UmbDetailRepositoryBase
 	 */
-	async save(model: DetailModelType) {
+	async save(model: DetailModelType, notificationFragmentCategory?: string) {
 		if (!model) throw new Error('Data is missing');
 		if (!model.unique) throw new Error('Unique is missing');
 		await this.#init;
@@ -112,7 +116,12 @@ export abstract class UmbDetailRepositoryBase<
 
 			// TODO: how do we handle generic notifications? Is this the correct place to do it?
 			const notification = { data: { message: `Saved` } };
-			this.#notificationContext!.peek('positive', notification);
+
+			if (notificationFragmentCategory) {
+				this.#notificationContext!.append('positive', notification, notificationFragmentCategory);
+			} else {
+				this.#notificationContext!.peek('positive', notification);
+			}
 		}
 
 		return { data: model, error };
@@ -124,7 +133,7 @@ export abstract class UmbDetailRepositoryBase<
 	 * @return {*}
 	 * @memberof UmbDetailRepositoryBase
 	 */
-	async delete(unique: string) {
+	async delete(unique: string, notificationFragmentCategory?: string) {
 		if (!unique) throw new Error('Unique is missing');
 		await this.#init;
 
@@ -135,7 +144,12 @@ export abstract class UmbDetailRepositoryBase<
 
 			// TODO: how do we handle generic notifications? Is this the correct place to do it?
 			const notification = { data: { message: `Deleted` } };
-			this.#notificationContext!.peek('positive', notification);
+
+			if (notificationFragmentCategory) {
+				this.#notificationContext!.append('positive', notification, notificationFragmentCategory);
+			} else {
+				this.#notificationContext!.peek('positive', notification);
+			}
 		}
 
 		return { error };

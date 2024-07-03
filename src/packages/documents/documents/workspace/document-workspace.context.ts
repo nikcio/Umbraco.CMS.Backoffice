@@ -34,7 +34,6 @@ import {
 	type UmbPublishableWorkspaceContext,
 	UmbSubmittableWorkspaceContextBase,
 	UmbWorkspaceIsNewRedirectController,
-	UmbWorkspaceRouteManager,
 	UmbWorkspaceSplitViewManager,
 } from '@umbraco-cms/backoffice/workspace';
 import {
@@ -53,17 +52,17 @@ import {
 	UmbRequestReloadStructureForEntityEvent,
 } from '@umbraco-cms/backoffice/entity-action';
 import { UMB_MODAL_MANAGER_CONTEXT } from '@umbraco-cms/backoffice/modal';
-import {
-	UmbServerModelValidationContext,
-	UmbVariantValuesValidationMessageTranslator,
-} from '@umbraco-cms/backoffice/validation';
+import { UmbServerModelValidationContext } from '@umbraco-cms/backoffice/validation';
 import { UmbDocumentBlueprintDetailRepository } from '@umbraco-cms/backoffice/document-blueprint';
-import { UMB_NOTIFICATION_CONTEXT } from '@umbraco-cms/backoffice/notification';
+import { UMB_NOTIFICATION_CONTEXT, UmbNotificationContext } from '@umbraco-cms/backoffice/notification';
 import type { UmbContentWorkspaceContext } from '@umbraco-cms/backoffice/content';
 import type { UmbDocumentTypeDetailModel } from '@umbraco-cms/backoffice/document-type';
 import { UmbIsTrashedEntityContext } from '@umbraco-cms/backoffice/recycle-bin';
 
 type EntityType = UmbDocumentDetailModel;
+
+export const UMB_DOCUMENT_SUBMIT_NOTIFICATION = 'document-submit-notification';
+
 export class UmbDocumentWorkspaceContext
 	extends UmbSubmittableWorkspaceContextBase<EntityType>
 	implements
@@ -160,8 +159,14 @@ export class UmbDocumentWorkspaceContext
 	// TODO: this might not be the correct place to spin this up
 	#isTrashedContext = new UmbIsTrashedEntityContext(this);
 
+	#notificationContext?: UmbNotificationContext;
+
 	constructor(host: UmbControllerHost) {
 		super(host, UMB_DOCUMENT_WORKSPACE_ALIAS);
+
+		this.consumeContext(UMB_NOTIFICATION_CONTEXT, (context) => {
+			this.#notificationContext = context;
+		});
 
 		this.observe(this.contentTypeUnique, (unique) => this.structure.loadType(unique));
 		this.observe(this.varies, (varies) => (this.#varies = varies));
@@ -578,7 +583,7 @@ export class UmbDocumentWorkspaceContext
 			const parent = this.#parent.getValue();
 			if (!parent) throw new Error('Parent is not set');
 
-			const { data, error } = await this.repository.create(saveData, parent.unique);
+			const { data, error } = await this.repository.create(saveData, parent.unique, UMB_DOCUMENT_SUBMIT_NOTIFICATION);
 			if (!data || error) {
 				console.error('Error creating document', error);
 				throw new Error('Error creating document');
@@ -595,7 +600,7 @@ export class UmbDocumentWorkspaceContext
 			});
 			eventContext.dispatchEvent(event);
 		} else {
-			const { data, error } = await this.repository.save(saveData);
+			const { data, error } = await this.repository.save(saveData, UMB_DOCUMENT_SUBMIT_NOTIFICATION);
 			if (!data || error) {
 				console.error('Error saving document', error);
 				throw new Error('Error saving document');
@@ -694,12 +699,12 @@ export class UmbDocumentWorkspaceContext
 				// If data of the selection is not valid Then just save:
 				await this.#performSaveOrCreate(saveData);
 				// Notifying that the save was successful, but we did not publish, which is what we want to symbolize here. [NL]
-				const notificationContext = await this.getContext(UMB_NOTIFICATION_CONTEXT);
-				// TODO: Get rid of the save notification.
+				this.#notificationContext?.removeCategory(UMB_DOCUMENT_SUBMIT_NOTIFICATION);
 				// TODO: Translate this message [NL]
-				notificationContext.peek('danger', {
+				this.#notificationContext?.peek('danger', {
 					data: { message: 'Document was not published, but we saved it for you.' },
 				});
+
 				// Reject even thought the save was successful, but we did not publish, which is what we want to symbolize here. [NL]
 				return await Promise.reject();
 			},
@@ -715,6 +720,7 @@ export class UmbDocumentWorkspaceContext
 		await this.publishingRepository.publish(
 			unique,
 			variantIds.map((variantId) => ({ variantId })),
+			UMB_DOCUMENT_SUBMIT_NOTIFICATION,
 		);
 
 		const eventContext = await this.getContext(UMB_ACTION_EVENT_CONTEXT);
@@ -759,15 +765,22 @@ export class UmbDocumentWorkspaceContext
 		return await this.#performSaveOrCreate(saveData);
 	}
 
-	public override requestSubmit() {
-		return this.#handleSave();
+	public override async requestSubmit() {
+		const submit = await this.#handleSave();
+		this.#peekNotifications();
+		return submit;
 	}
 
-	public submit() {
-		return this.#handleSave();
+	public async submit() {
+		const submit = await this.#handleSave();
+		this.#peekNotifications();
+		return submit;
 	}
-	public override invalidSubmit() {
-		return this.#handleSave();
+
+	public override async invalidSubmit() {
+		const submit = await this.#handleSave();
+		this.#peekNotifications();
+		return submit;
 	}
 
 	public async publish() {
@@ -775,11 +788,19 @@ export class UmbDocumentWorkspaceContext
 	}
 
 	public async saveAndPreview(): Promise<void> {
-		return this.#handleSaveAndPreview();
+		const submit = await this.#handleSaveAndPreview();
+		this.#peekNotifications();
+		return submit;
 	}
 
 	public async saveAndPublish(): Promise<void> {
-		return this.#handleSaveAndPublish();
+		const submit = await this.#handleSaveAndPublish();
+		this.#peekNotifications();
+		return submit;
+	}
+
+	#peekNotifications() {
+		this.#notificationContext?.peekCompilation(UMB_DOCUMENT_SUBMIT_NOTIFICATION);
 	}
 
 	public async schedule() {
@@ -809,7 +830,8 @@ export class UmbDocumentWorkspaceContext
 
 		const unique = this.getUnique();
 		if (!unique) throw new Error('Unique is missing');
-		await this.publishingRepository.publish(unique, variants);
+		await this.publishingRepository.publish(unique, variants, UMB_DOCUMENT_SUBMIT_NOTIFICATION);
+		this.#peekNotifications();
 	}
 
 	public async unpublish() {
